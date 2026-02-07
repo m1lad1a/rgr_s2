@@ -3,12 +3,12 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <limits>
 #include <dlfcn.h>
 
 using namespace std;
 
-// CLI вспомогательное
-
+// вспомогательное
 string getArg(int argc, char* argv[], const string& name) {
     for (int i = 1; i < argc - 1; ++i)
         if (argv[i] == name) return argv[i + 1];
@@ -22,7 +22,6 @@ bool hasFlag(int argc, char* argv[], const string& flag) {
 }
 
 // CLI-режим
-
 int cliMode(int argc, char* argv[]) {
     string cipher = getArg(argc, argv, "--cipher");
     bool encrypt = hasFlag(argc, argv, "-e") || hasFlag(argc, argv, "--encrypt");
@@ -101,7 +100,7 @@ int cliMode(int argc, char* argv[]) {
 
     } 
     else if (cipher == "tableshift") {
-        using func_enc_t = void(*)(const string&, const string&, int, int, const string&);
+        using func_enc_t = void(*)(const string&, const string&, int, int);
         using func_dec_t = void(*)(const string&, const string&, const string&);
         
         func_enc_t encFunc = (func_enc_t) dlsym(handle, "tableshiftEnc");
@@ -114,15 +113,23 @@ int cliMode(int argc, char* argv[]) {
         }
 
         if (encrypt) {
-            if (rowsStr.empty() || colsStr.empty() || keyFile.empty()) {
-                cout << "Для tableshift в режиме шифрования требуются --rows, --cols и --key" << endl;
+            if (keyFile.empty()) {
+                cout << "Для tableshift требуется файл ключа (--key)" << endl;
                 dlclose(handle);
                 return 1;
             }
-            int rows = stoi(rowsStr);
-            int cols = stoi(colsStr);
-            encFunc(input, output, rows, cols, keyFile);
+            ifstream keyIn(keyFile);
+            if (!keyIn.is_open()) {
+                cout << "Не удалось открыть файл ключа: " << keyFile << endl;
+                dlclose(handle);
+                return 1;
+            }
+            int rows, cols;
+            keyIn >> rows >> cols;
+            keyIn.close();
+            encFunc(input, output, rows, cols);
         }
+
         if (decrypt) {
             if (keyFile.empty()) {
                 cout << "Для tableshift в режиме дешифрования требуется --key" << endl;
@@ -156,49 +163,65 @@ int cliMode(int argc, char* argv[]) {
 int main(int argc, char* argv[]) {
     setlocale(LC_ALL, "");
 
-    // CLI
     if (argc > 1)
         return cliMode(argc, argv);
 
-    // интерактивное меню
-    Crypto system;
+    // меню
     int choice;
-
     do {
-        system.showMenu();
+        showMenu();
+        string line;
+        getline(cin, line);
 
-        if (!(cin >> choice)) {
-            cin.clear();
-            cin.ignore(10000, '\n');
-            choice = -1;
+        if (line.empty()) {
+            choice = -1; 
+        } else {
+            try {
+                choice = stoi(line);
+            } catch (...) {
+                choice = -1; 
+            }
         }
-        cin.ignore();
 
-        if (choice < 0 || choice > 4) { 
+        // корректность
+        if (choice < 0 || choice > 4) {
             char repeat;
             do {
                 cout << "Неверный выбор. Повторить ввод? (Y/N): ";
-                cin >> repeat;
-                cin.ignore(10000, '\n');
-                repeat = toupper(repeat);
+                getline(cin, line);
+
+                if (line.empty()) {
+                    repeat = '\0';
+                } else {
+                    repeat = toupper(line[0]);
+                }
+
             } while (repeat != 'Y' && repeat != 'N');
 
             if (repeat == 'N') {
                 cout << "Выход...\n";
                 break;
             } else {
-                continue; 
+                continue;
             }
         }
 
+        // выполнение действия 
         switch (choice) {
-            case 1: system.inputTextToFile(); break;
-            case 2: system.encryptFile(); break;
-            case 3: system.decryptFile(); break;
-            case 4: system.displayFile(); break;
+            case 1: inputTextToFile(); break;
+            case 2: encryptFile(); break;
+            case 3: decryptFile(); break;
+            case 4: displayFile(); break;
             case 0:
                 cout << "Выход..." << endl;
                 break;
+        }
+
+        // пауза
+        if (choice != 0) {
+            cout << "\nНажмите Enter, чтобы продолжить...";
+            getline(cin, line);  
+            clearScreen();
         }
 
     } while (choice != 0);
